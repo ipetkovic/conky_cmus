@@ -1,0 +1,73 @@
+background no
+update_interval 0.25
+
+override_utf8_locale yes
+
+double_buffer yes
+no_buffers yes
+
+text_buffer_size 2048
+
+# XFCE lightdm backround issue
+own_window_argb_visual yes
+own_window_argb_value 0
+
+# Window specifications #
+own_window_class Conky
+own_window yes
+own_window_type normal
+own_window_transparent yes
+own_window_hints undecorated,sticky,skip_taskbar,skip_pager,below
+
+border_inner_margin 0
+border_outer_margin 0
+
+minimum_size 500 100
+maximum_width 500
+
+alignment br
+gap_x 0
+gap_y 20
+
+# Graphics settings #
+draw_shades no
+draw_outline no
+draw_borders no
+draw_graph_borders no
+
+#default_color gray
+default_shade_color red
+default_outline_color green
+
+# Text settings #
+use_xft yes
+override_utf8_locale yes
+xftfont Play:normal:size=8
+xftalpha 0.9
+uppercase no
+
+# TEXT color
+default_color 333333
+
+# GREEN
+#color0 b2ff34
+#color1 efefef
+
+# BLUE
+color0 34cdff
+color1 efefef
+
+
+lua_load ~/tmp/conky-cmus.lua
+lua_draw_hook_pre main
+
+TEXT
+${if_match "${lua_parse cmus_get_status}" != "stopped"}
+${font Michroma:size=10}${color0}
+${alignr 140}${lua_parse cmus_get_artist_uppercase}
+${font Play:normal:size=8}${alignr 140}${alignr 140}${lua_parse cmus_get_album} (${lua_parse cmus_get_date})
+${color1}${alignr 140}${lua_parse cmus_get_song_title}
+
+
+${alignr 140}${lua_parse cmus_get_current_time} / ${lua_parse cmus_get_duration}
+${endif}
