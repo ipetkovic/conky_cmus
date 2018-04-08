@@ -1,8 +1,22 @@
 require 'cairo'
 require 'imlib2'
 
-local cmus_info = {}
+-- refresh rate factor used when cmus is not running or track is stopped
+-- cmus will be checked on each <refresh_rate_factor_stopped>-th
+--   conky update interval
+local refresh_rate_factor_stopped = 8
+
+-- progress bar colors
+local progress_bar_bg_color = 0x3b3b3b
+local progress_bar_bg_alpha = 0.6
+local progress_bar_fg_color_playing = 0x34cdff
+local progress_bar_fg_color_paused = 0xff7200
+local progress_bar_fg_alpha = 0.8
+
+-- global data
+local cmus_info_global = nil
 local artwork_image_data = nil
+local current_refresh_rate_factor = refresh_rate_factor_stopped
 
 -- some helper functions
 
@@ -43,7 +57,9 @@ local function find_album_art(dir)
     -- try to find album art in same folder where playing track is
     local files = list_dir(dir)
     local matching_names = {
-        'folder.jpg', 'Folder.jpg', 'folder.png', 'Folder.png'
+        'folder.jpg', 'Folder.jpg', 'folder.png', 'Folder.png',
+        'cover.jpg', 'cover.png', 'Cover.jpg', 'Cover.png',
+        'front.jpg', 'front.png', 'Front.jpg', 'Front.png'
     }
     for index, artwork_filename in ipairs(matching_names) do
         if table_has_value(files, artwork_filename) then
@@ -88,6 +104,7 @@ local function artwork_image_update(file)
     imlib_free_image()
 end
 
+
 local function artwork_image_draw()
     local x = 380
     local y = 30
@@ -107,42 +124,46 @@ local function pretty_time(num_of_seconds)
 end
 
 local function cmus_get_info()
-    local f = io.popen("cmus-remote -Q")
+    local f = io.popen("cmus-remote -Q 2>&1")
     local line = f:read("*l")
+
+    local info = {}
 
     while line do
         if string.find(line, "^file") then
-            local file = string.match(line, ".*", 6)
-
-            --check if playing track has changed
-            --  if so, update album art
-            if file ~= cmus_info.file then
-                local album_art = find_album_art(dirname(file))
-                artwork_image_update(album_art)
-            end
-            cmus_info.file = string.match(line, ".*", 6)
+            info.file = string.match(line, ".*", 6)
         elseif string.find(line, "^status") then
-            cmus_info.status = string.match(line, "[%w]*", 8)
+            local status = string.match(line, "[%w]*", 8)
+            if status == 'stopped' then
+                info = nil
+                break
+            end
+            info.status = status
         elseif string.find(line, "^duration") then
-            cmus_info.duration = tonumber(string.match(line, "%d*", 10))
+            info.duration = tonumber(string.match(line, "%d*", 10))
         elseif string.find(line, "^position") then
-            cmus_info.position = tonumber(string.match(line, "%d*", 10))
+            info.position = tonumber(string.match(line, "%d*", 10))
         elseif string.find(line, "^tag title") then
-            cmus_info.title = string.match(line, ".*", 11)
+            info.title = string.match(line, ".*", 11)
         elseif string.find(line, "^tag artist") then
-            cmus_info.artist = string.match(line, ".*", 12)
+            info.artist = string.match(line, ".*", 12)
         elseif string.find(line, "^tag album ") then
-            cmus_info.album = string.match(line, ".*", 11)
+            info.album = string.match(line, ".*", 11)
         elseif string.find(line, "^tag date") then
-            cmus_info.date = string.match(line, ".*", 10)
+            info.date = string.match(line, ".*", 10)
         elseif string.find(line, "^tag tracknumber") then
-            cmus_info.tracknumber = string.match(line, ".*", 17)
+            info.tracknumber = string.match(line, ".*", 17)
         end
         line = f:read("*l")
     end
     f:close()
 
-    return cmus_info
+    -- cannot find better approach to check if cmus-remote failed
+    if info ~=nil and info.status == nil then
+        info = nil
+    end
+
+    return info
 end
 
 local function rgb_to_r_g_b(color, alpha)
@@ -152,15 +173,12 @@ local function rgb_to_r_g_b(color, alpha)
 	return color_r, color_g, color_b, alpha
 end
 
-local function progress_bar_draw(cr)
-    bg_color = 0x3b3b3b
-    bg_alpha = 0.6
-
-    fg_alpha = 0.8
+local function progress_bar_draw(cr, cmus_info)
+    local progress_bar_fg_color
     if cmus_info.status == 'playing' then
-        fg_color = 0x34cdff
+        progress_bar_fg_color = progress_bar_fg_color_playing
     else
-        fg_color = 0xff7200
+        progress_bar_fg_color = progress_bar_fg_color_paused
     end
 
     bar_bottom_left_x= 160
@@ -169,13 +187,17 @@ local function progress_bar_draw(cr)
     bar_height= 5
 
     -- draw progress bar background
-    cairo_set_source_rgba(cr, rgb_to_r_g_b(bg_color, bg_alpha))
+    cairo_set_source_rgba(
+        cr, rgb_to_r_g_b(progress_bar_bg_color, progress_bar_bg_alpha)
+    )
     cairo_rectangle(cr, bar_bottom_left_x, bar_bottom_left_y,
                     bar_width, bar_height)
     cairo_fill(cr)
 
     -- draw progress bar
-    cairo_set_source_rgba(cr, rgb_to_r_g_b(fg_color, fg_alpha))
+    cairo_set_source_rgba(
+        cr, rgb_to_r_g_b(progress_bar_fg_color, progress_bar_fg_alpha)
+    )
     value = cmus_info.position
     max_value = cmus_info.duration
     scale = value / max_value
@@ -189,64 +211,127 @@ end
 -- conky API
 
 function conky_cmus_get_status()
-    return cmus_info.status
+    local status = 'stopped'
+    if cmus_info_global ~= nil then
+        status = cmus_info_global.status
+    end
+    return status
 end
 
 function conky_cmus_get_duration()
-    return pretty_time(cmus_info.duration)
+    local get_duration = ''
+    if cmus_info_global ~= nil then
+        get_duration = pretty_time(cmus_info_global.duration)
+    end
+    return get_duration
 end
 
 function conky_cmus_get_current_time()
-    return pretty_time(cmus_info.position)
+    local current_time = ''
+    if cmus_info_global ~= nil then
+        current_time = pretty_time(cmus_info_global.position)
+    end
+    return current_time
 end
 
 function conky_cmus_get_artist()
-    return cmus_info.artist
+    local artist = ''
+    if cmus_info_global ~= nil then
+        artist = cmus_info_global.artist
+    end
+    return artist
 end
 
 function conky_cmus_get_artist_uppercase()
-    return cmus_info.artist:upper()
+    local artist_uppercase = ''
+    if cmus_info_global ~= nil then
+        artist_uppercase = cmus_info_global.artist:upper()
+    end
+    return artist_uppercase
 end
 
 function conky_cmus_get_album()
-    return cmus_info.album
+    local album = ''
+    if cmus_info_global ~= nil then
+        album = cmus_info_global.album
+    end
+    return album
 end
 
 function conky_cmus_get_song_title()
-    return cmus_info.title
+    local song_title = ''
+    if cmus_info_global ~= nil then
+        song_title = cmus_info_global.title
+    end
+    return song_title
 end
 
 function conky_cmus_get_track_number()
-    return cmus_info.tracknumber
+    local track_number = ''
+    if cmus_info_global ~= nil then
+        track_number = cmus_info_global.tracknumber
+    end
+    return track_number
 end
 
 function conky_cmus_get_date()
-    return cmus_info.date
+    local date = ''
+    if cmus_info_global ~= nil then
+        date = cmus_info_global.date
+    end
+    return date
 end
 
 function conky_cmus_get_position()
-    return cmus_info.position
+    local position = ''
+    if cmus_info_global ~= nil then
+        position = cmus_info_global.position
+    end
+    return position
 end
 
 function conky_main()
     if conky_window == nil then
         return
     end
-    local cmus_info = cmus_get_info()
-    local cs = cairo_xlib_surface_create(conky_window.display,
-                                         conky_window.drawable,
-                                         conky_window.visual,
-                                         conky_window.width,
-                                         conky_window.height)
-    cr = cairo_create(cs)
+
+    local cmus_info = cmus_info_global;
     local updates = tonumber(conky_parse('${updates}'))
-    if updates > 5 then
-        if cmus_info.status ~= 'stopped' then
-            progress_bar_draw(cr)
-            artwork_image_draw()
-        end
+    if updates % current_refresh_rate_factor == 0 then
+        cmus_info = cmus_get_info()
     end
-    cairo_destroy(cr)
-    cairo_surface_destroy(cs)
+
+    if cmus_info == nil then
+        current_refresh_rate_factor = refresh_rate_factor_stopped
+    else
+        current_refresh_rate_factor = 1
+
+        local new_track = cmus_info.file
+        local old_track = cmus_info_global and cmus_info_global.file
+
+        -- check if playing track has changed. If so, update album art
+        if new_track ~= old_track then
+            local album_art = find_album_art(dirname(new_track))
+            artwork_image_update(album_art)
+        end
+
+        local cs = cairo_xlib_surface_create(conky_window.display,
+                                             conky_window.drawable,
+                                             conky_window.visual,
+                                             conky_window.width,
+                                             conky_window.height)
+        cr = cairo_create(cs)
+
+        if updates > 5 then
+            if cmus_info ~= nil then
+                progress_bar_draw(cr, cmus_info)
+                artwork_image_draw()
+            end
+        end
+        cairo_destroy(cr)
+        cairo_surface_destroy(cs)
+    end
+
+    cmus_info_global = cmus_info
 end
 

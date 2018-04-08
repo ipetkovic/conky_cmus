@@ -22,12 +22,12 @@ own_window_hints undecorated,sticky,skip_taskbar,skip_pager,below
 border_inner_margin 0
 border_outer_margin 0
 
-minimum_size 500 100
+minimum_size 500 140
 maximum_width 500
 
 alignment br
 gap_x 0
-gap_y 20
+gap_y 40
 
 # Graphics settings #
 draw_shades no
@@ -59,7 +59,7 @@ color1 efefef
 
 
 lua_load ~/tmp/conky-cmus.lua
-lua_draw_hook_pre main
+lua_draw_hook_post main
 
 TEXT
 ${if_match "${lua_parse cmus_get_status}" != "stopped"}
