@@ -75,19 +75,26 @@ local function find_album_art(dir)
             end
         end
     end
+
+    print('Cannot find album art in'..' '..dir)
 end
 
 local function artwork_image_update(file)
     -- artwork is updated only on track change
 
-    -- artwork size
-    local width = 100
-    local height = 100
-
     if artwork_image_data ~= nil then
         imlib_context_set_image(artwork_image_data)
         imlib_free_image()
+        artwork_image_data = nil
     end
+
+    if file == nil then
+        return
+    end
+
+    -- artwork size
+    local width = 100
+    local height = 100
 
     local image = imlib_load_image(file)
     if image == nil then
@@ -108,8 +115,11 @@ end
 local function artwork_image_draw()
     local x = 380
     local y = 30
-    imlib_context_set_image(artwork_image_data)
-    imlib_render_image_on_drawable(x, y)
+
+    if artwork_image_data ~= nil then
+        imlib_context_set_image(artwork_image_data)
+        imlib_render_image_on_drawable(x, y)
+    end
 end
 
 

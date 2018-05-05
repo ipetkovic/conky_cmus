@@ -58,7 +58,7 @@ color0 34cdff
 color1 efefef
 
 
-lua_load ~/tmp/conky-cmus.lua
+lua_load ~/.conky/cmus/conky-cmus.lua
 lua_draw_hook_post main
 
 TEXT
